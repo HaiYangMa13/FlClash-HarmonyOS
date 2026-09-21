@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/enum/enum.dart';
 import 'package:fl_clash/manager/app_manager.dart';
@@ -36,49 +38,43 @@ class HomePage extends StatelessWidget {
               final isMobile = state.viewMode == ViewMode.mobile;
               final navigationItems = state.navigationItems;
               final currentIndex = state.currentIndex;
-              final bottomNavigationBar = NavigationBarTheme(
-                data: _NavigationBarDefaultsM3(context),
-                child: NavigationBar(
-                  destinations: navigationItems
-                      .map(
-                        (e) => NavigationDestination(
-                          icon: e.icon,
-                          label: Intl.message(e.label.name),
-                        ),
-                      )
-                      .toList(),
-                  onDestinationSelected: (index) {
-                    _handleToPage(navigationItems[index].label);
-                  },
-                  selectedIndex: currentIndex,
-                ),
-              );
               if (isMobile) {
+                final mediaQuery = MediaQuery.of(context);
+                final safeBottom = mediaQuery.padding.bottom;
+                const barHeight = 64.0;
+                const barBottomMargin = 10.0;
+                final totalBottomOffset =
+                    barHeight + barBottomMargin + safeBottom;
+
                 return AnnotatedRegion<SystemUiOverlayStyle>(
                   value: systemUiOverlayStyle.copyWith(
-                    systemNavigationBarColor:
-                        context.colorScheme.surfaceContainer,
+                    systemNavigationBarColor: Colors.transparent,
+                    systemNavigationBarDividerColor: Colors.transparent,
+                    systemNavigationBarContrastEnforced: false,
                   ),
-                  child: Column(
+                  child: Stack(
                     children: [
-                      Flexible(
-                        flex: 1,
-                        child: MediaQuery.removePadding(
-                          removeTop: false,
-                          removeBottom: true,
-                          removeLeft: true,
-                          removeRight: true,
-                          context: context,
+                      Positioned.fill(
+                        child: MediaQuery(
+                          data: mediaQuery.copyWith(
+                            padding: mediaQuery.padding.copyWith(
+                              bottom: totalBottomOffset + 12.0,
+                            ),
+                          ),
                           child: child!,
                         ),
                       ),
-                      MediaQuery.removePadding(
-                        removeTop: true,
-                        removeBottom: false,
-                        removeLeft: true,
-                        removeRight: true,
-                        context: context,
-                        child: bottomNavigationBar,
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: _OhosGlassBottomBar(
+                          items: navigationItems,
+                          currentIndex: currentIndex,
+                          onSelected: (index) {
+                            _handleToPage(navigationItems[index].label);
+                          },
+                        ),
                       ),
                     ],
                   ),
@@ -219,60 +215,174 @@ class _HomePageViewState extends ConsumerState<_HomePageView> {
   }
 }
 
-class _NavigationBarDefaultsM3 extends NavigationBarThemeData {
-  _NavigationBarDefaultsM3(this.context)
-    : super(
-        height: 80.0,
-        elevation: 3.0,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-      );
+class _OhosGlassBottomBar extends StatelessWidget {
+  final List<NavigationItem> items;
+  final int currentIndex;
+  final ValueChanged<int> onSelected;
 
-  final BuildContext context;
-  late final ColorScheme _colors = Theme.of(context).colorScheme;
-  late final TextTheme _textTheme = Theme.of(context).textTheme;
-
-  @override
-  Color? get backgroundColor => _colors.surfaceContainer;
+  const _OhosGlassBottomBar({
+    required this.items,
+    required this.currentIndex,
+    required this.onSelected,
+  });
 
   @override
-  Color? get shadowColor => Colors.transparent;
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
 
-  @override
-  Color? get surfaceTintColor => Colors.transparent;
-
-  @override
-  WidgetStateProperty<IconThemeData?>? get iconTheme {
-    return WidgetStateProperty.resolveWith((Set<WidgetState> states) {
-      return IconThemeData(
-        size: 24.0,
-        color: states.contains(WidgetState.disabled)
-            ? _colors.onSurfaceVariant.opacity38
-            : states.contains(WidgetState.selected)
-            ? _colors.onSecondaryContainer
-            : _colors.onSurfaceVariant,
-      );
-    });
+    return SafeArea(
+      top: false,
+      left: false,
+      right: false,
+      bottom: true,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 18, right: 18, bottom: 10),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(34),
+                boxShadow: [
+                  BoxShadow(
+                    color: isDark
+                        ? Colors.black.withOpacity(0.42)
+                        : Colors.black.withOpacity(0.08),
+                    blurRadius: 28,
+                    offset: const Offset(0, 10),
+                    spreadRadius: -2,
+                  ),
+                  if (isDark)
+                    BoxShadow(
+                      color: colorScheme.primary.withOpacity(0.06),
+                      blurRadius: 16,
+                      offset: const Offset(0, 0),
+                    ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(34),
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: 28, sigmaY: 28),
+                  child: Container(
+                    height: 64,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(34),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: isDark
+                            ? [const Color(0xDD242428), const Color(0xB8151518)]
+                            : [
+                                Colors.white.withOpacity(0.88),
+                                Colors.white.withOpacity(0.72),
+                              ],
+                      ),
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white.withOpacity(0.18)
+                            : Colors.white.withOpacity(0.90),
+                        width: 0.85,
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: List.generate(items.length, (index) {
+                        final item = items[index];
+                        final isSelected = index == currentIndex;
+                        final labelText = Intl.message(item.label.name);
+                        return Expanded(
+                          child: _OhosGlassTabItem(
+                            icon: item.icon,
+                            label: labelText,
+                            isSelected: isSelected,
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              onSelected(index);
+                            },
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
+}
+
+class _OhosGlassTabItem extends StatelessWidget {
+  final Icon icon;
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _OhosGlassTabItem({
+    required this.icon,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   @override
-  Color? get indicatorColor => _colors.secondaryContainer;
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
 
-  @override
-  ShapeBorder? get indicatorShape => const StadiumBorder();
+    final activeColor = isDark ? Colors.white : colorScheme.primary;
+    final inactiveColor = isDark
+        ? Colors.white.withOpacity(0.48)
+        : Colors.black.withOpacity(0.42);
 
-  @override
-  WidgetStateProperty<TextStyle?>? get labelTextStyle {
-    return WidgetStateProperty.resolveWith((Set<WidgetState> states) {
-      final TextStyle style = _textTheme.labelMedium!;
-      return style.apply(
-        overflow: TextOverflow.ellipsis,
-        color: states.contains(WidgetState.disabled)
-            ? _colors.onSurfaceVariant.opacity38
-            : states.contains(WidgetState.selected)
-            ? _colors.onSurface
-            : _colors.onSurfaceVariant,
-      );
-    });
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Center(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? (isDark
+                      ? Colors.white.withOpacity(0.12)
+                      : colorScheme.primary.withOpacity(0.12))
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon.icon,
+                size: 21,
+                color: isSelected ? activeColor : inactiveColor,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                  color: isSelected ? activeColor : inactiveColor,
+                  height: 1.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

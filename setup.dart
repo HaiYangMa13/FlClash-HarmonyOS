@@ -320,7 +320,9 @@ Future<String> _prepareOhosGoToolchain(
   final toolchainRoot = explicitRoot != null && explicitRoot.isNotEmpty
       ? explicitRoot
       : p.join(rootDir, '.ohos_toolchain', 'go-nonglibc');
-  final goBinary = File(p.join(toolchainRoot, 'bin', 'go'));
+  final goBinary = File(
+    p.join(toolchainRoot, 'bin', Platform.isWindows ? 'go.exe' : 'go'),
+  );
   if (goBinary.existsSync()) {
     return toolchainRoot;
   }
@@ -341,10 +343,10 @@ Future<String> _prepareOhosGoToolchain(
   );
 
   process.stdout.listen((data) {
-    stdout.write(utf8.decode(data));
+    stdout.write(utf8.decode(data, allowMalformed: true));
   });
   process.stderr.listen((data) {
-    stderr.write(utf8.decode(data));
+    stderr.write(utf8.decode(data, allowMalformed: true));
   });
 
   final exitCode = await process.exitCode;
@@ -604,6 +606,13 @@ void _verifyOhosSqliteLibrary(String rootDir) {
     );
     exit(1);
   }
+  // HarmonyOS 7 resolves Dart FFI native libraries from the arm64-v8a
+  // directory, while older Flutter OHOS packaging expected arm64.
+  final sqliteArm64V8a = File(
+    p.join(rootDir, 'ohos', 'entry', 'libs', 'arm64-v8a', 'libsqlite3.so'),
+  );
+  sqliteArm64V8a.parent.createSync(recursive: true);
+  sqliteLibrary.copySync(sqliteArm64V8a.path);
   if (!coreBinary.existsSync()) {
     stderr.writeln(
       'Missing OHOS core shared library: ${coreBinary.path}. '
@@ -618,14 +627,16 @@ void _verifyOhosSqliteLibrary(String rootDir) {
     );
     exit(1);
   }
-  final fileResult = Process.runSync('file', [coreBinary.path]);
-  final fileOutput = '${fileResult.stdout}${fileResult.stderr}';
-  if (!fileOutput.contains('shared object')) {
-    stderr.writeln(
-      'Invalid OHOS core library: ${coreBinary.path}. '
-      'Expected a shared object, got: ${fileOutput.trim()}',
-    );
-    exit(1);
+  if (!Platform.isWindows) {
+    final fileResult = Process.runSync('file', [coreBinary.path]);
+    final fileOutput = '${fileResult.stdout}${fileResult.stderr}';
+    if (!fileOutput.contains('shared object')) {
+      stderr.writeln(
+        'Invalid OHOS core library: ${coreBinary.path}. '
+        'Expected a shared object, got: ${fileOutput.trim()}',
+      );
+      exit(1);
+    }
   }
   if (!executableCoreBinary.existsSync()) {
     stderr.writeln(
@@ -712,7 +723,9 @@ _OhosBuildContext _prepareOhosBuildContext(String rootDir) {
   return _OhosBuildContext(
     originalSdkRoot: originalSdkRoot,
     compatibleSdkRoot: compatibleSdkRoot,
-    devecoSdkRoot: p.dirname(originalSdkRoot),
+    devecoSdkRoot: Platform.isWindows
+        ? p.dirname(p.dirname(originalSdkRoot))
+        : p.dirname(originalSdkRoot),
     flutterSdkRoot: flutterSdkRoot,
     nodeHome: _resolveOhosNodeHome(),
   );
@@ -771,6 +784,15 @@ void _normalizeFlutterSdkVersionMetadata(String flutterSdkRoot) {
 }
 
 String _prepareCompatibleOhosSdkView(String rootDir, String originalSdkRoot) {
+  // DevEco's Windows SDK manager rejects junction-based compatibility views
+  // as an SDK management-mode change. The installed OpenHarmony SDK is
+  // already a valid direct SDK root on Windows, so keep it in place.
+  if (Platform.isWindows) {
+    // Hvigor expects the DevEco SDK manager root in local.properties, not
+    // the nested default/openharmony component directory.
+    return p.dirname(p.dirname(originalSdkRoot));
+  }
+
   if (_isCompatibleOhosSdkRoot(originalSdkRoot)) {
     return originalSdkRoot;
   }
@@ -827,12 +849,33 @@ String _prepareCompatibleOhosSdkView(String rootDir, String originalSdkRoot) {
     );
     if (targetEntity != FileSystemEntityType.notFound) {
       if (targetEntity == FileSystemEntityType.directory) {
-        Directory(targetDir.path).deleteSync(recursive: true);
+        if (Platform.isWindows) {
+          // Directory junctions do not require SeCreateSymbolicLinkPrivilege,
+          // and must be removed without recursively deleting their target.
+          Process.runSync('cmd', ['/c', 'rmdir', targetDir.path]);
+        } else {
+          Directory(targetDir.path).deleteSync(recursive: true);
+        }
       } else {
         Link(targetDir.path).deleteSync();
       }
     }
-    Link(targetDir.path).createSync(componentDir.path);
+    if (Platform.isWindows) {
+      final result = Process.runSync('cmd', [
+        '/c',
+        'mklink',
+        '/J',
+        targetDir.path,
+        componentDir.path,
+      ]);
+      if (result.exitCode != 0) {
+        stderr.writeln('Failed to create SDK junction: ${targetDir.path}');
+        stderr.write(result.stderr);
+        exit(result.exitCode);
+      }
+    } else {
+      Link(targetDir.path).createSync(componentDir.path);
+    }
   }
 
   return compatRoot.path;
@@ -864,7 +907,7 @@ void _writeOhosLocalProperties(String rootDir, _OhosBuildContext context) {
 
   final lines = <String>[
     'hwsdk.dir=${context.devecoSdkRoot}',
-    'sdk.dir=${context.compatibleSdkRoot}',
+    if (!Platform.isWindows) 'sdk.dir=${context.compatibleSdkRoot}',
     if (context.nodeHome != null) 'nodejs.dir=${context.nodeHome!}',
     'flutter.sdk=${context.flutterSdkRoot}',
     'flutter.versionName=${appVersion.versionName}',
@@ -919,6 +962,11 @@ void _repairOhosDartPackageResolution(
   String rootDir,
   _OhosBuildContext context,
 ) {
+  // The legacy mirror paths below are macOS/Linux compatibility paths. On
+  // Windows the package config already points at native Windows paths, and
+  // creating POSIX-style symlinks requires an elevated privilege.
+  if (Platform.isWindows) return;
+
   final packageConfigFile = File(
     p.join(rootDir, '.dart_tool', 'package_config.json'),
   );
@@ -1273,6 +1321,7 @@ Map<String, String> _buildOhosEnvironment(_OhosBuildContext context) {
     if (Platform.isMacOS) '/opt/homebrew/bin',
     if (Platform.isMacOS) '/usr/local/bin',
     p.join(context.originalSdkRoot, 'toolchains'),
+    p.join(context.originalSdkRoot, 'native', 'llvm', 'bin'),
     if (Platform.isMacOS)
       '/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin',
     if (Platform.isMacOS)
@@ -1469,7 +1518,7 @@ Future<int> _buildOhosCoreExecutable(
     [
       'build',
       '-ldflags=-w -s -X github.com/metacubex/mihomo/component/http.forceConservativeTransport=true',
-      '-tags=with_gvisor',
+      '-tags=with_gvisor,ohos',
       '-o',
       outputPath,
     ],

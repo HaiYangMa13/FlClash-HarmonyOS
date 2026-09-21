@@ -138,6 +138,8 @@ function resolveHvigorwPath() {
     process.env.HVIGOR_HOME && path.join(process.env.HVIGOR_HOME, 'bin', 'hvigorw'),
     process.env.DEVECO_HOME &&
         path.join(process.env.DEVECO_HOME, 'Contents', 'tools', 'hvigor', 'bin', 'hvigorw'),
+    process.platform === 'win32' &&
+        path.join('D:', 'DevEco Studio', 'tools', 'hvigor', 'bin', 'hvigorw'),
     '/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin/hvigorw',
   ].filter(Boolean);
 
@@ -179,7 +181,11 @@ function ensureSymlink(targetPath, linkPath) {
     }
   }
   removePathSync(linkPath);
-  fs.symlinkSync(targetPath, linkPath, 'dir');
+  fs.symlinkSync(
+      targetPath,
+      linkPath,
+      process.platform === 'win32' ? 'junction' : 'dir',
+  );
 }
 
 function getBundledHvigorNodeModules() {

@@ -158,7 +158,7 @@ export default class AppPlugin implements FlutterPlugin, MethodCallHandler {
   }
 
   private async waitForVpnStatus(path: string): Promise<string> {
-    for (let index = 0; index < 30; index += 1) {
+    for (let index = 0; index < 150; index += 1) {
       const status = this.readVpnStatus(path);
       if (
         status === 'started' ||
@@ -172,7 +172,7 @@ export default class AppPlugin implements FlutterPlugin, MethodCallHandler {
   }
 
   private async waitForVpnStoppedStatus(path: string): Promise<string> {
-    for (let index = 0; index < 30; index += 1) {
+    for (let index = 0; index < 150; index += 1) {
       const status = this.readVpnStatus(path);
       if (
         status === 'stopped' ||
@@ -1015,7 +1015,7 @@ export default class AppPlugin implements FlutterPlugin, MethodCallHandler {
       try {
         await this.withTimeout(
           vpnExtension.startVpnExtensionAbility(want),
-          3000,
+          15000,
           'startVpnExtensionAbility timeout',
         );
       } catch (error) {

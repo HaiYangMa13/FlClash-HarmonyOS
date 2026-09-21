@@ -100,7 +100,9 @@ export default class FlClashVpnAbility extends VpnExtensionAbility {
   }
 
   async onCreate(want: Want): Promise<void> {
+    console.info('[FlClashVpnAbility] onCreate begin');
     this.vpnConnection = vpnExtension.createVpnConnection(this.context);
+    console.info('[FlClashVpnAbility] vpn connection created');
     const protectLoopToken = ++this.protectLoopToken;
     writeVpnStatus(this.context.filesDir, 'starting');
     const stack = getStringParam(want, 'stack', 'mixed');
@@ -135,13 +137,16 @@ export default class FlClashVpnAbility extends VpnExtensionAbility {
       if (initParamsJson.length === 0 || setupParamsJson.length === 0) {
         throw new Error('missing init/setup params for quickSetup');
       }
+      console.info('[FlClashVpnAbility] quickSetup begin');
       const setupResult = nativeBridge.quickSetup(
         initParamsJson,
         setupParamsJson,
       );
+      console.info(`[FlClashVpnAbility] quickSetup end result=${setupResult}`);
       if (setupResult.length > 0) {
         throw new Error(`quickSetup failed: ${setupResult}`);
       }
+      console.info('[FlClashVpnAbility] vpn connection create begin');
       const fd = await this.vpnConnection.create({
         addresses,
         routes,
@@ -153,6 +158,7 @@ export default class FlClashVpnAbility extends VpnExtensionAbility {
         isBlocking: false,
         blockedApplications: vpnApplicationLists.blockedApplications,
       });
+      console.info(`[FlClashVpnAbility] vpn fd created=${fd}`);
       try {
         await this.vpnConnection.protectProcessNet();
       } catch (error) {
@@ -161,6 +167,7 @@ export default class FlClashVpnAbility extends VpnExtensionAbility {
         );
       }
       void this.pumpProtectRequests(protectLoopToken);
+      console.info('[FlClashVpnAbility] startTun begin');
       const started = nativeBridge.startTun(
         fd,
         stack,
@@ -171,6 +178,7 @@ export default class FlClashVpnAbility extends VpnExtensionAbility {
         throw new Error(`startTun failed: ${nativeBridge.lastError()}`);
       }
       tunStarted = true;
+      console.info('[FlClashVpnAbility] startTun complete');
       // Link the main app UI to THIS (traffic-serving) core: the embedded core
       // dials the main app's CoreService socket in-process, so the same core
       // that runs the tun also answers UI queries and pushes live events.

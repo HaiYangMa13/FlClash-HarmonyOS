@@ -12,6 +12,26 @@ import 'util.dart';
 
 final _log = Logger('go_builder');
 
+String _windowsShortPath(String value) {
+  if (!Platform.isWindows || !value.contains(' ')) return value;
+  final result = Process.runSync('cmd.exe', [
+    '/c',
+    'for %I in ("$value") do @echo %~sI',
+  ]);
+  var shortPath = (result.stdout as String).trim();
+  shortPath = shortPath.replaceAll('"', '');
+  final fallback = value
+      .replaceFirst(r'D:\DevEco Studio', r'D:\DEVECO~1')
+      .replaceFirst(r'\default\openharmony', r'\default\OPENHA~1');
+  // Reject malformed cmd output such as D:\D:\... and use the known
+  // short-name fallback instead.
+  if (result.exitCode == 0 && shortPath.isNotEmpty &&
+      shortPath.contains('~')) {
+    return shortPath;
+  }
+  return fallback;
+}
+
 String _resolveCc(Target target) {
   if (target.platformDir == 'ohos') {
     final clang = File(
@@ -20,13 +40,13 @@ String _resolveCc(Target target) {
         'native',
         'llvm',
         'bin',
-        'aarch64-unknown-linux-ohos-clang',
+        Platform.isWindows ? 'clang.exe' : 'aarch64-unknown-linux-ohos-clang',
       ),
     );
     if (!clang.existsSync()) {
       throw BuildException('OHOS clang not found: ${clang.path}');
     }
-    return clang.path;
+    return _windowsShortPath(clang.path);
   }
   final ndk = Environment.androidNdk;
   final prebuiltDir = Directory(
@@ -47,8 +67,14 @@ String _resolveOhosGoExecutable(String rootDir) {
   final explicitRoot = Platform.environment['FLCLASH_OHOS_GOROOT'];
   final candidates = <String>[
     if (explicitRoot != null && explicitRoot.isNotEmpty)
-      p.join(explicitRoot, 'bin', 'go'),
-    p.join(absoluteRootDir, '.ohos_toolchain', 'go-nonglibc', 'bin', 'go'),
+      p.join(explicitRoot, 'bin', Platform.isWindows ? 'go.exe' : 'go'),
+    p.join(
+      absoluteRootDir,
+      '.ohos_toolchain',
+      'go-nonglibc',
+      'bin',
+      Platform.isWindows ? 'go.exe' : 'go',
+    ),
   ];
 
   for (final candidate in candidates) {
@@ -109,9 +135,32 @@ class GoBuilder {
         target.platformDir == 'ohos' ? _resolveOhosGoExecutable(rootDir) : 'go';
 
     if (target.isLib) {
+      if (Platform.isWindows && target.platformDir == 'ohos') {
+        final configFile = File(
+          p.join(rootDir, '.ohos_toolchain', 'clang-ohos.cfg'),
+        )..parent.createSync(recursive: true);
+        configFile.writeAsStringSync(
+          '-target\naarch64-linux-ohos\n'
+          '--sysroot=${p.join(Environment.ohosSdkRoot, 'native', 'sysroot')}\n'
+          '-D__MUSL__\n',
+        );
+        env['CLANG_CONFIG_FILE'] = configFile.path;
+      }
       env['CGO_ENABLED'] = '1';
-      env['CC'] = _resolveCc(target);
-      env['CFLAGS'] = '-O3 -Werror';
+      env['CC'] = Platform.isWindows && target.platformDir == 'ohos'
+          ? '${_resolveCc(target)} -target aarch64-linux-ohos '
+              '--sysroot=${_windowsShortPath(p.join(Environment.ohosSdkRoot, 'native', 'sysroot'))} '
+              '-D__MUSL__'
+          : _resolveCc(target);
+      final cgoFlags = '-O3 -Werror';
+      // cgo consumes CGO_CFLAGS; plain CFLAGS is ignored by the Go tool.
+      env['CFLAGS'] = cgoFlags;
+      env['CGO_CFLAGS'] = cgoFlags;
+      if (Platform.isWindows && target.platformDir == 'ohos') {
+        env['AR'] = _windowsShortPath(
+          p.join(Environment.ohosSdkRoot, 'native', 'llvm', 'bin', 'llvm-ar.exe'),
+        );
+      }
       if (target.platformDir == 'ohos' && goExecutable != 'go') {
         env['GOROOT'] = p.dirname(p.dirname(goExecutable));
       }
@@ -121,6 +170,7 @@ class GoBuilder {
 
     final args = [
       'build',
+      if (target.platformDir == 'ohos') '-mod=mod',
       '-ldflags=$ldflags',
       '-tags=${_tagsForTarget(target)}',
       if (target.isLib) '-buildmode=c-shared',
@@ -195,6 +245,7 @@ class GoBuilder {
 
     final args = [
       'build',
+      '-mod=mod',
       '-ldflags=${_ldflagsForTarget(target, config.libName)}',
       '-tags=${_tagsForTarget(target)}',
       '-buildmode=c-archive',

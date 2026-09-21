@@ -36,10 +36,17 @@ git -C "$TARGET_DIR" checkout --force "$REF"
 
 (
   cd "$TARGET_DIR/src"
-  env \
-    GOTOOLCHAIN=local \
-    GOROOT_BOOTSTRAP="$BOOTSTRAP_GOROOT" \
-    ./make.bash
+  if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* || "$(uname -s)" == CYGWIN* ]]; then
+    env \
+      GOTOOLCHAIN=local \
+      GOROOT_BOOTSTRAP="$BOOTSTRAP_GOROOT" \
+      ./make.bat
+  else
+    env \
+      GOTOOLCHAIN=local \
+      GOROOT_BOOTSTRAP="$BOOTSTRAP_GOROOT" \
+      ./make.bash
+  fi
 )
 
 "$TARGET_DIR/bin/go" version

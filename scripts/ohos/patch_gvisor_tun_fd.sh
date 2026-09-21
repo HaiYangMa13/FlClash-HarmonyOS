@@ -44,7 +44,7 @@ for ep in "${endpoints[@]}"; do
     continue
   fi
   chmod u+w "$ep"
-  python3 - "$ep" "$MARKER" <<'PY'
+  python - "$ep" "$MARKER" <<'PY'
 import sys
 path, marker = sys.argv[1], sys.argv[2]
 with open(path, "r", encoding="utf-8") as f:

@@ -169,7 +169,23 @@ void _setupSqliteForOhos() {
 }
 
 DynamicLibrary _openSqliteOnOhos() {
-  return DynamicLibrary.open('libsqlite3.so');
+  // OHOS 7 does not always include the app's native library directory in
+  // the dynamic loader search path for Dart FFI. Try the bare soname first,
+  // then the paths used by the OHOS Flutter embedder and bundle sandbox.
+  const candidates = [
+    'libsqlite3.so',
+    '/data/storage/el1/bundle/libs/arm64/libsqlite3.so',
+    '/data/app/el1/bundle/public/com.follow.clash/libs/arm64/libsqlite3.so',
+  ];
+  Object? lastError;
+  for (final path in candidates) {
+    try {
+      return DynamicLibrary.open(path);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw StateError('Unable to load OHOS sqlite3 library: $lastError');
 }
 
 void _setSqliteTempDirectoryForOhos() {

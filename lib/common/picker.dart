@@ -121,17 +121,36 @@ class Picker {
     return path;
   }
 
+  Future<String?> captureConfigQRCode() async {
+    if (!system.isOhos) return null;
+    final picked = await _ohosFilePickerChannel
+        .invokeMapMethod<String, dynamic>('captureImageForFlClash');
+    if (picked == null) return null;
+    final file = PlatformFile.fromMap(picked);
+    var imagePath = file.path;
+    if ((imagePath == null || imagePath.isEmpty) && file.bytes != null) {
+      final tempPath = await appPath.tempFilePath;
+      await File('$tempPath.jpg').safeWriteAsBytes(file.bytes!);
+      imagePath = '$tempPath.jpg';
+    }
+    if (imagePath == null || imagePath.isEmpty) return null;
+    final result = await CoreController().decodeQrImage(imagePath);
+    if (!result.isUrl) {
+      throw currentAppLocalizations.pleaseUploadValidQrcode;
+    }
+    return result;
+  }
+
   Future<String?> pickerConfigQRCode() async {
     String? imagePath;
     PlatformFile? picked;
     if (system.isOhos) {
-      picked = await pickerFile(
-        withData: true,
-        allowedExtensions: const <String>['png', 'jpg', 'jpeg', 'webp'],
-      );
-      if (picked == null) {
+      final nativePicked = await _ohosFilePickerChannel
+          .invokeMapMethod<String, dynamic>('pickImageFromGallery');
+      if (nativePicked == null) {
         return null;
       }
+      picked = PlatformFile.fromMap(nativePicked);
       imagePath = picked.path;
       if ((imagePath == null || imagePath.isEmpty) && picked.bytes != null) {
         final tempPath = await appPath.tempFilePath;

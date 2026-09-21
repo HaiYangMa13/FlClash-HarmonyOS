@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/enum/enum.dart';
 import 'package:fl_clash/models/models.dart';
@@ -157,10 +159,11 @@ class _ProfilesViewState extends State<ProfilesView> {
                                 commonPrint.log(
                                   '[profile-select-ui] onChanged profileId=$profileId current=${state.currentProfileId}',
                                 );
-                                ref
-                                        .read(currentProfileIdProvider.notifier)
-                                        .value =
-                                    profileId;
+                                unawaited(
+                                  ref
+                                      .read(profilesActionProvider.notifier)
+                                      .selectProfileAndApply(profileId),
+                                );
                               },
                             ),
                           ),

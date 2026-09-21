@@ -1,6 +1,10 @@
 {
   "string": [
     {
+      "name": "camera_permission_reason",
+      "value": "Allow FlClash to scan subscription QR codes with the camera."
+    },
+    {
       "name": "module_desc",
       "value": "FlClash HarmonyOS entry module"
     },

@@ -29,6 +29,13 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
     await controller.stop();
   }
 
+  Future<void> _handleCaptureFromCamera() async {
+    final url = await globalState.safeRun(picker.captureConfigQRCode);
+    if (mounted && url != null) {
+      Navigator.pop<String>(context, url);
+    }
+  }
+
   Future<void> _handlePickFromGallery() async {
     await _stopScanner();
     final url = await globalState.safeRun(picker.pickerConfigQRCode);
@@ -46,16 +53,15 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _subscription = controller.barcodes.listen(_handleBarcode);
-    unawaited(controller.start());
-    if (system.isOhos && globalState.isPre) {
+    if (system.isOhos) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _didAutoPickFromGallery) {
-          return;
-        }
+        if (!mounted || _didAutoPickFromGallery) return;
         _didAutoPickFromGallery = true;
-        unawaited(_handlePickFromGallery());
+        unawaited(_handleCaptureFromCamera());
       });
+    } else {
+      _subscription = controller.barcodes.listen(_handleBarcode);
+      unawaited(controller.start());
     }
   }
 
@@ -89,7 +95,10 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final double sideLength = min(400, MediaQuery.of(context).size.width * 0.67);
+    final double sideLength = min(
+      400,
+      MediaQuery.of(context).size.width * 0.67,
+    );
     final scanWindow = Rect.fromCenter(
       center: MediaQuery.sizeOf(context).center(Offset.zero),
       width: sideLength,

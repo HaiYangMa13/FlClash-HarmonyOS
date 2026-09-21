@@ -9,7 +9,11 @@ import {
   MethodChannel,
   MethodResult,
 } from '@ohos/flutter_ohos';
-import { UIAbility } from '@kit.AbilityKit';
+import { common, UIAbility } from '@kit.AbilityKit';
+import Want from '@ohos.app.ability.Want';
+import photoAccessHelper from '@ohos.file.photoAccessHelper';
+import fileUri from '@ohos.file.fileuri';
+import { fileIo as fs } from '@kit.CoreFileKit';
 
 import { FilePickerDelegate } from './FilePickerDelegate';
 import { FilePickerUtils } from './FilePickerUtils';
@@ -65,6 +69,14 @@ export default class FilePickerPlugin implements FlutterPlugin, MethodCallHandle
       return;
     }
     const args = (call.args as Map<string, Object>) ?? new Map<string, Object>();
+    if (call.method === 'pickImageFromGallery') {
+      void this.pickImageFromGallery(result);
+      return;
+    }
+    if (call.method === 'captureImageForFlClash') {
+      void this.captureImageForFlClash(result);
+      return;
+    }
     if (call.method === 'pickForFlClash') {
       const allowMultipleSelection =
         (args.get('allowMultipleSelection') as boolean | undefined) ?? false;
@@ -118,6 +130,69 @@ export default class FilePickerPlugin implements FlutterPlugin, MethodCallHandle
       allowedExtensions,
       result,
     );
+  }
+
+  private async captureImageForFlClash(result: MethodResult): Promise<void> {
+    if (this.ability === null) {
+      result.error('no_activity', 'file picker plugin requires a foreground ability', null);
+      return;
+    }
+    const context = this.ability.context as common.UIAbilityContext;
+    const outputPath = `${context.cacheDir}/flclash-camera-${Date.now()}.jpg`;
+    try {
+      const outputFile = fs.openSync(outputPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
+      fs.closeSync(outputFile);
+      const want: Want = {
+        action: 'ohos.want.action.imageCapture',
+        type: 'image/*',
+        uri: fileUri.getUriFromPath(outputPath),
+      };
+      context.startAbilityForResult(want, async (error, abilityResult) => {
+        if (error || abilityResult?.resultCode !== 0) {
+          result.success(null);
+          return;
+        }
+        const uri = abilityResult.want?.uri ?? fileUri.getUriFromPath(outputPath);
+        try {
+          await FilePickerUtils.prepareReadPermission(uri);
+          const file = await FilePickerUtils.openFileStream(context, uri, true);
+          result.success(file?.toMap() ?? null);
+        } catch (readError) {
+          result.error('camera_read_failed', String(readError), null);
+        }
+      });
+    } catch (error) {
+      result.error('camera_capture_failed', String(error), null);
+    }
+  }
+
+  private async pickImageFromGallery(result: MethodResult): Promise<void> {
+    if (this.ability === null) {
+      result.error('no_activity', 'file picker plugin requires a foreground ability', null);
+      return;
+    }
+    try {
+      const photoPicker = new photoAccessHelper.PhotoViewPicker();
+      const options = new photoAccessHelper.PhotoSelectOptions();
+      options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+      options.maxSelectNumber = 1;
+      const selected = await photoPicker.select(options);
+      const uri = selected.photoUris?.[0] ?? '';
+      if (!uri) {
+        result.success(null);
+        return;
+      }
+      await FilePickerUtils.prepareReadPermission(uri);
+      const file = await FilePickerUtils.openFileStream(
+        this.ability.context as common.UIAbilityContext,
+        uri,
+        true,
+      );
+      result.success(file?.toMap() ?? null);
+    } catch (error) {
+      Log.e(TAG, `pickImageFromGallery failed: ${String(error)}`);
+      result.error('gallery_pick_failed', String(error), null);
+    }
   }
 
   private setup(messenger: BinaryMessenger): void {

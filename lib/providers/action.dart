@@ -297,13 +297,10 @@ class SetupAction extends _$SetupAction {
 
   @override
   void build() {
-    applyProfileOnInitStart ??=
-        ({VoidCallback? preloadInvoke}) => applyProfile(
-          force: true,
-          preloadInvoke: preloadInvoke,
-        );
-    tryStartCoreForStatusStart ??=
-        () => ref.read(coreActionProvider.notifier).tryStartCore(true);
+    applyProfileOnInitStart ??= ({VoidCallback? preloadInvoke}) =>
+        applyProfile(force: true, preloadInvoke: preloadInvoke);
+    tryStartCoreForStatusStart ??= () =>
+        ref.read(coreActionProvider.notifier).tryStartCore(true);
     applyProfileForFallback ??= () => applyProfile(force: true, silence: true);
     startCoreListener ??= () => coreController.startListener();
     applyProfileForInitIdle ??= () => applyProfile(force: true);
@@ -419,9 +416,7 @@ class SetupAction extends _$SetupAction {
     return applied;
   }
 
-  Future<void> _handleStart({
-    bool syncCoreState = true,
-  }) async {
+  Future<void> _handleStart({bool syncCoreState = true}) async {
     startTime ??= DateTime.now();
     //The local status must be updated when performing the run task
     ref.read(commonActionProvider.notifier).updateRunTime();
@@ -491,7 +486,8 @@ class SetupAction extends _$SetupAction {
     startTime = rollbackState.startTime;
     ref.read(commonActionProvider.notifier).updateRunTime();
     ref.read(coreStatusProvider.notifier).value = rollbackState.coreStatus;
-    ref.read(trafficsProvider.notifier).value = rollbackState.traffics.copyWith();
+    ref.read(trafficsProvider.notifier).value = rollbackState.traffics
+        .copyWith();
     ref.read(totalTrafficProvider.notifier).value = rollbackState.totalTraffic;
     clearOhosVpnStopRollbackState();
     return true;
@@ -556,9 +552,7 @@ class SetupAction extends _$SetupAction {
   Future<void> fallbackCurrentProfileForTest({
     bool useOhosVpnConfigOnly = false,
   }) {
-    return _fallbackCurrentProfile(
-      useOhosVpnConfigOnly: useOhosVpnConfigOnly,
-    );
+    return _fallbackCurrentProfile(useOhosVpnConfigOnly: useOhosVpnConfigOnly);
   }
 
   Future<void> updateStatus(
@@ -1036,8 +1030,8 @@ class CoreAction extends _$CoreAction {
   Future<String> Function() preloadCore = () => coreController.preload();
 
   @visibleForTesting
-  Future<void> Function(bool isUser) shutdownCore =
-      (isUser) => coreController.shutdown(isUser);
+  Future<void> Function(bool isUser) shutdownCore = (isUser) =>
+      coreController.shutdown(isUser);
 
   @visibleForTesting
   Future<void> Function()? initCoreOverride;
@@ -1053,8 +1047,8 @@ class CoreAction extends _$CoreAction {
   FutureOr<bool> Function() isCoreInit = () => coreController.isInit;
 
   @visibleForTesting
-  Future<bool> Function(int version) runCoreInit =
-      (version) => coreController.init(version);
+  Future<bool> Function(int version) runCoreInit = (version) =>
+      coreController.init(version);
 
   @visibleForTesting
   Future<AuthorizeCode> Function() authorizeCore = () => system.authorizeCore();
@@ -1068,8 +1062,8 @@ class CoreAction extends _$CoreAction {
   @override
   void build() {
     restartCoreAfterAuthorization ??= () => restartCore();
-    applyProfileAfterRestart ??=
-        () => ref.read(setupActionProvider.notifier).applyProfile(force: true);
+    applyProfileAfterRestart ??= () =>
+        ref.read(setupActionProvider.notifier).applyProfile(force: true);
   }
 
   Future<void> initCore() async {
@@ -1113,8 +1107,10 @@ class CoreAction extends _$CoreAction {
       }
     } else {
       commonPrint.log('[OHOS-CORE] initCore skip init and update groups');
-      await ref.read(proxiesActionProvider.notifier).updateGroups();
     }
+    final proxiesAction = ref.read(proxiesActionProvider.notifier);
+    await proxiesAction.updateGroups();
+    await proxiesAction.applyPersistedSelections();
     commonPrint.log('[OHOS-CORE] initCore exit');
   }
 
@@ -1446,6 +1442,30 @@ class ProxiesAction extends _$ProxiesAction {
     }, args: [groupName, proxyName]);
   }
 
+  Future<void> applyPersistedSelections() async {
+    if (ref.read(coreStatusProvider) != CoreStatus.connected) return;
+    final selectedMap = sanitizeSelectedMap(
+      groups: ref.read(groupsProvider),
+      selectedMap: ref.read(
+        currentProfileProvider.select((state) => state?.selectedMap ?? {}),
+      ),
+    );
+    for (final entry in selectedMap.entries) {
+      try {
+        await changeProxy(groupName: entry.key, proxyName: entry.value);
+        commonPrint.log(
+          '[selected-map] restored group=${entry.key} proxy=${entry.value}',
+        );
+      } catch (error) {
+        commonPrint.log(
+          '[selected-map] restore failed group=${entry.key} '
+          'proxy=${entry.value} error=$error',
+          logLevel: LogLevel.warning,
+        );
+      }
+    }
+  }
+
   Future<void> updateGroups() async {
     try {
       commonPrint.log('updateGroups');
@@ -1608,6 +1628,25 @@ class ProfilesAction extends _$ProfilesAction {
         commonPrint.log(e.toString(), logLevel: LogLevel.warning);
       }
     }
+  }
+
+  Future<bool> selectProfileAndApply(int? profileId) async {
+    if (profileId == null) return false;
+    final previousId = ref.read(currentProfileIdProvider);
+    if (previousId == profileId) return true;
+
+    ref.read(currentProfileIdProvider.notifier).value = profileId;
+    await preferences.saveConfig(ref.read(configProvider));
+
+    // On OHOS the VPN process owns the active mihomo core. Rebuild and
+    // persist config immediately when the subscription changes; waiting for
+    // the next VPN click leaves the old subscription active.
+    final applied = await ref.read(setupActionProvider.notifier).fullSetup();
+    if (!applied && previousId != null) {
+      ref.read(currentProfileIdProvider.notifier).value = previousId;
+      await preferences.saveConfig(ref.read(configProvider));
+    }
+    return applied;
   }
 
   void putProfile(Profile profile) {

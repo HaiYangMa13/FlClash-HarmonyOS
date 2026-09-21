@@ -10,10 +10,9 @@ import {
   MethodResult,
 } from '@ohos/flutter_ohos';
 import { common, UIAbility } from '@kit.AbilityKit';
-import Want from '@ohos.app.ability.Want';
+import camera from '@ohos.multimedia.camera';
+import cameraPicker from '@ohos.multimedia.cameraPicker';
 import photoAccessHelper from '@ohos.file.photoAccessHelper';
-import fileUri from '@ohos.file.fileuri';
-import { fileIo as fs } from '@kit.CoreFileKit';
 
 import { FilePickerDelegate } from './FilePickerDelegate';
 import { FilePickerUtils } from './FilePickerUtils';
@@ -138,30 +137,25 @@ export default class FilePickerPlugin implements FlutterPlugin, MethodCallHandle
       return;
     }
     const context = this.ability.context as common.UIAbilityContext;
-    const outputPath = `${context.cacheDir}/flclash-camera-${Date.now()}.jpg`;
     try {
-      const outputFile = fs.openSync(outputPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE);
-      fs.closeSync(outputFile);
-      const want: Want = {
-        action: 'ohos.want.action.imageCapture',
-        type: 'image/*',
-        uri: fileUri.getUriFromPath(outputPath),
+      const pickerProfile: cameraPicker.PickerProfile = {
+        cameraPosition: camera.CameraPosition.CAMERA_POSITION_BACK,
       };
-      context.startAbilityForResult(want, async (error, abilityResult) => {
-        if (error || abilityResult?.resultCode !== 0) {
-          result.success(null);
-          return;
-        }
-        const uri = abilityResult.want?.uri ?? fileUri.getUriFromPath(outputPath);
-        try {
-          await FilePickerUtils.prepareReadPermission(uri);
-          const file = await FilePickerUtils.openFileStream(context, uri, true);
-          result.success(file?.toMap() ?? null);
-        } catch (readError) {
-          result.error('camera_read_failed', String(readError), null);
-        }
-      });
+      const pickerResult = await cameraPicker.pick(
+        context,
+        [cameraPicker.PickerMediaType.PHOTO],
+        pickerProfile,
+      );
+      if (!pickerResult || pickerResult.resultCode !== 0 || !pickerResult.resultUri) {
+        result.success(null);
+        return;
+      }
+      const uri = pickerResult.resultUri;
+      await FilePickerUtils.prepareReadPermission(uri);
+      const file = await FilePickerUtils.openFileStream(context, uri, true);
+      result.success(file?.toMap() ?? null);
     } catch (error) {
+      Log.e(TAG, `captureImageForFlClash failed: ${String(error)}`);
       result.error('camera_capture_failed', String(error), null);
     }
   }

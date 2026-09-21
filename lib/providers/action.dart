@@ -404,10 +404,14 @@ class SetupAction extends _$SetupAction {
   Future<bool> fullSetup() async {
     if (!ref.read(initProvider)) return false;
     ref.read(delayDataSourceProvider.notifier).value = {};
-    final useOhosVpnConfigOnly = shouldUseOhosVpnConfigOnly(
-      isOhos: isOhosPlatform!(),
-      vpnEnabled: ref.read(vpnStateProvider).vpnProps.enable,
-    );
+    final isCoreConnected =
+        ref.read(coreStatusProvider) == CoreStatus.connected;
+    final useOhosVpnConfigOnly =
+        !isCoreConnected &&
+        shouldUseOhosVpnConfigOnly(
+          isOhos: isOhosPlatform!(),
+          vpnEnabled: ref.read(vpnStateProvider).vpnProps.enable,
+        );
     final applied = useOhosVpnConfigOnly
         ? await prepareProfileConfigOnly(force: true)
         : await applyProfile(force: true);
@@ -702,6 +706,9 @@ class SetupAction extends _$SetupAction {
       preloadInvoke: preloadInvoke,
       onUpdated: () async {
         await ref.read(proxiesActionProvider.notifier).updateGroups();
+        await ref
+            .read(proxiesActionProvider.notifier)
+            .applyPersistedSelections();
         await ref.read(providersProvider.notifier).syncProviders();
       },
     );

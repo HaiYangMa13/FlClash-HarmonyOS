@@ -169,16 +169,35 @@ class _ScanPageState extends State<ScanPage> with WidgetsBindingObserver {
           Container(
             margin: const EdgeInsets.only(bottom: 32),
             alignment: Alignment.bottomCenter,
-            child: IconButton(
-              color: Colors.white,
-              style: IconButton.styleFrom(
-                foregroundColor: Colors.white,
-                backgroundColor: Colors.grey,
-              ),
-              padding: const EdgeInsets.all(16),
-              iconSize: 32.0,
-              onPressed: _handlePickFromGallery,
-              icon: const Icon(Icons.photo_camera_back),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (system.isOhos) ...[
+                  IconButton(
+                    color: Colors.white,
+                    style: IconButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.grey.shade800,
+                    ),
+                    padding: const EdgeInsets.all(16),
+                    iconSize: 32.0,
+                    onPressed: _handleCaptureFromCamera,
+                    icon: const Icon(Icons.camera_alt),
+                  ),
+                  const SizedBox(width: 24),
+                ],
+                IconButton(
+                  color: Colors.white,
+                  style: IconButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: Colors.grey.shade800,
+                  ),
+                  padding: const EdgeInsets.all(16),
+                  iconSize: 32.0,
+                  onPressed: _handlePickFromGallery,
+                  icon: const Icon(Icons.photo_camera_back),
+                ),
+              ],
             ),
           ),
         ],

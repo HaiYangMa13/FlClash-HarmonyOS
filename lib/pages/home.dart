@@ -1,9 +1,10 @@
-import 'dart:ui' as ui;
+import 'dart:async';
 
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/enum/enum.dart';
 import 'package:fl_clash/manager/app_manager.dart';
 import 'package:fl_clash/models/common.dart';
+import 'package:fl_clash/plugins/app.dart';
 import 'package:fl_clash/providers/providers.dart';
 import 'package:fl_clash/state.dart';
 import 'package:fl_clash/widgets/widgets.dart';
@@ -11,8 +12,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-
-typedef OnSelected = void Function(int index);
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -38,50 +37,59 @@ class HomePage extends StatelessWidget {
               final isMobile = state.viewMode == ViewMode.mobile;
               final navigationItems = state.navigationItems;
               final currentIndex = state.currentIndex;
-              if (isMobile) {
-                final mediaQuery = MediaQuery.of(context);
-                final safeBottom = mediaQuery.padding.bottom;
-                const barHeight = 64.0;
-                const barBottomMargin = 10.0;
-                final totalBottomOffset =
-                    barHeight + barBottomMargin + safeBottom;
-
+              if (!isMobile && !system.isOhos) {
+                return child!;
+              }
+              if (system.isOhos) {
                 return AnnotatedRegion<SystemUiOverlayStyle>(
                   value: systemUiOverlayStyle.copyWith(
                     systemNavigationBarColor: Colors.transparent,
                     systemNavigationBarDividerColor: Colors.transparent,
-                    systemNavigationBarContrastEnforced: false,
                   ),
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: MediaQuery(
-                          data: mediaQuery.copyWith(
-                            padding: mediaQuery.padding.copyWith(
-                              bottom: totalBottomOffset + 12.0,
-                            ),
-                          ),
-                          child: child!,
-                        ),
-                      ),
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        child: _OhosGlassBottomBar(
-                          items: navigationItems,
-                          currentIndex: currentIndex,
-                          onSelected: (index) {
-                            _handleToPage(navigationItems[index].label);
-                          },
-                        ),
-                      ),
-                    ],
+                  child: _OhosNativeTabHost(
+                    items: navigationItems,
+                    currentIndex: currentIndex,
+                    onSelected: (index) {
+                      _handleToPage(navigationItems[index].label);
+                    },
+                    child: child!,
                   ),
                 );
-              } else {
-                return child!;
               }
+              return AnnotatedRegion<SystemUiOverlayStyle>(
+                value: systemUiOverlayStyle.copyWith(
+                  systemNavigationBarColor: context.colorScheme.surfaceContainer,
+                  systemNavigationBarDividerColor: Colors.transparent,
+                ),
+                child: Column(
+                  children: [
+                    Flexible(
+                      flex: 1,
+                      child: MediaQuery.removePadding(
+                        removeTop: false,
+                        removeBottom: true,
+                        removeLeft: true,
+                        removeRight: true,
+                        context: context,
+                        child: child!,
+                      ),
+                    ),
+                    NavigationBar(
+                      selectedIndex: currentIndex,
+                      onDestinationSelected: (index) {
+                        _handleToPage(navigationItems[index].label);
+                      },
+                      destinations: [
+                        for (final item in navigationItems)
+                          NavigationDestination(
+                            icon: item.icon,
+                            label: Intl.message(item.label.name),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
             },
             child: Consumer(
               builder: (_, ref, _) {
@@ -96,7 +104,7 @@ class HomePage extends StatelessWidget {
                     final navigationView = navigationItem.builder(context);
                     final view = KeepScope(
                       keep: navigationItem.keep,
-                      child: isMobile
+                      child: isMobile || system.isOhos
                           ? navigationView
                           : Navigator(
                               pages: [MaterialPage(child: navigationView)],
@@ -111,6 +119,140 @@ class HomePage extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _OhosNativeTabHost extends ConsumerStatefulWidget {
+  final List<NavigationItem> items;
+  final int currentIndex;
+  final ValueChanged<int> onSelected;
+  final Widget child;
+
+  const _OhosNativeTabHost({
+    required this.items,
+    required this.currentIndex,
+    required this.onSelected,
+    required this.child,
+  });
+
+  @override
+  ConsumerState<_OhosNativeTabHost> createState() => _OhosNativeTabHostState();
+}
+
+class _OhosNativeTabHostState extends ConsumerState<_OhosNativeTabHost> {
+  Timer? _idleShowTimer;
+  bool _tabBarHidden = false;
+
+  @override
+  void initState() {
+    super.initState();
+    app?.onNativeTabSelected = _handleNativeTabSelected;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncNativeTabs();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _OhosNativeTabHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final itemsChanged = oldWidget.items.length != widget.items.length ||
+        !_sameItems(oldWidget.items, widget.items);
+    if (itemsChanged) {
+      _syncNativeTabs();
+      return;
+    }
+    if (oldWidget.currentIndex != widget.currentIndex) {
+      app?.setNativeTabIndex(widget.currentIndex);
+    }
+  }
+
+  @override
+  void dispose() {
+    _idleShowTimer?.cancel();
+    if (app?.onNativeTabSelected == _handleNativeTabSelected) {
+      app?.onNativeTabSelected = null;
+    }
+    super.dispose();
+  }
+
+  bool _sameItems(List<NavigationItem> a, List<NavigationItem> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].label != b[i].label) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _handleNativeTabSelected(int index) {
+    if (index < 0 || index >= widget.items.length) {
+      return;
+    }
+    if (index == widget.currentIndex) {
+      return;
+    }
+    widget.onSelected(index);
+  }
+
+  Future<void> _syncNativeTabs() async {
+    await app?.syncNativeTabs(
+      items: [
+        for (final item in widget.items)
+          {
+            'id': item.label.name,
+            'label': Intl.message(item.label.name),
+          },
+      ],
+      index: widget.currentIndex,
+    );
+  }
+
+  bool _isUserScroll(ScrollNotification notification) {
+    if (notification is ScrollStartNotification) {
+      return notification.dragDetails != null;
+    }
+    if (notification is ScrollUpdateNotification) {
+      return notification.dragDetails != null;
+    }
+    return false;
+  }
+
+  void _hideTabBarOnScroll() {
+    _idleShowTimer?.cancel();
+    if (_tabBarHidden) {
+      return;
+    }
+    _tabBarHidden = true;
+    app?.setNativeTabBarVisible(visible: false, mode: 'scroll');
+  }
+
+  void _showTabBarAfterScroll() {
+    _idleShowTimer?.cancel();
+    _idleShowTimer = Timer(const Duration(milliseconds: 280), () {
+      if (!_tabBarHidden) {
+        return;
+      }
+      _tabBarHidden = false;
+      app?.setNativeTabBarVisible(visible: true, mode: 'scroll');
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (_isUserScroll(notification)) {
+          _hideTabBarOnScroll();
+        } else if (notification is ScrollEndNotification) {
+          _showTabBarAfterScroll();
+        }
+        return false;
+      },
+      child: widget.child,
     );
   }
 }
@@ -169,7 +311,7 @@ class _HomePageViewState extends ConsumerState<_HomePageView> {
       return;
     }
     final isAnimateToPage = ref.read(appSettingProvider).isAnimateToPage;
-    final isMobile = ref.read(isMobileViewProvider);
+    final isMobile = ref.read(isMobileViewProvider) || system.isOhos;
     commonPrint.log(
       '[tab-nav] toPage label=${pageLabel.name} index=$index '
       'animate=${isAnimateToPage && isMobile && !ignoreAnimateTo} '
@@ -211,177 +353,6 @@ class _HomePageViewState extends ConsumerState<_HomePageView> {
       itemBuilder: (context, index) {
         return widget.pageBuilder(context, index);
       },
-    );
-  }
-}
-
-class _OhosGlassBottomBar extends StatelessWidget {
-  final List<NavigationItem> items;
-  final int currentIndex;
-  final ValueChanged<int> onSelected;
-
-  const _OhosGlassBottomBar({
-    required this.items,
-    required this.currentIndex,
-    required this.onSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return SafeArea(
-      top: false,
-      left: false,
-      right: false,
-      bottom: true,
-      child: Padding(
-        padding: const EdgeInsets.only(left: 18, right: 18, bottom: 10),
-        child: Align(
-          alignment: Alignment.bottomCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(34),
-                boxShadow: [
-                  BoxShadow(
-                    color: isDark
-                        ? Colors.black.withOpacity(0.42)
-                        : Colors.black.withOpacity(0.08),
-                    blurRadius: 28,
-                    offset: const Offset(0, 10),
-                    spreadRadius: -2,
-                  ),
-                  if (isDark)
-                    BoxShadow(
-                      color: colorScheme.primary.withOpacity(0.06),
-                      blurRadius: 16,
-                      offset: const Offset(0, 0),
-                    ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(34),
-                child: BackdropFilter(
-                  filter: ui.ImageFilter.blur(sigmaX: 28, sigmaY: 28),
-                  child: Container(
-                    height: 64,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(34),
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: isDark
-                            ? [const Color(0xDD242428), const Color(0xB8151518)]
-                            : [
-                                Colors.white.withOpacity(0.88),
-                                Colors.white.withOpacity(0.72),
-                              ],
-                      ),
-                      border: Border.all(
-                        color: isDark
-                            ? Colors.white.withOpacity(0.18)
-                            : Colors.white.withOpacity(0.90),
-                        width: 0.85,
-                      ),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: List.generate(items.length, (index) {
-                        final item = items[index];
-                        final isSelected = index == currentIndex;
-                        final labelText = Intl.message(item.label.name);
-                        return Expanded(
-                          child: _OhosGlassTabItem(
-                            icon: item.icon,
-                            label: labelText,
-                            isSelected: isSelected,
-                            onTap: () {
-                              HapticFeedback.selectionClick();
-                              onSelected(index);
-                            },
-                          ),
-                        );
-                      }),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _OhosGlassTabItem extends StatelessWidget {
-  final Icon icon;
-  final String label;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _OhosGlassTabItem({
-    required this.icon,
-    required this.label,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    final activeColor = isDark ? Colors.white : colorScheme.primary;
-    final inactiveColor = isDark
-        ? Colors.white.withOpacity(0.48)
-        : Colors.black.withOpacity(0.42);
-
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Center(
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? (isDark
-                      ? Colors.white.withOpacity(0.12)
-                      : colorScheme.primary.withOpacity(0.12))
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon.icon,
-                size: 21,
-                color: isSelected ? activeColor : inactiveColor,
-              ),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                  color: isSelected ? activeColor : inactiveColor,
-                  height: 1.1,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

@@ -19,6 +19,13 @@ import {
 import { stringifyError } from './error_utils';
 import { resolveVpnStartResult } from './vpn_start_decision';
 import { resolveVpnStopResult } from './vpn_stop_decision';
+import {
+  EVENT_SET_NATIVE_TAB_INDEX,
+  EVENT_SET_NATIVE_TAB_BAR_VISIBLE,
+  EVENT_SYNC_NATIVE_TABS,
+  NativeTabItem,
+  NativeTabSyncPayload,
+} from './native_tab_types';
 
 interface NativeBridge {
   invokeCore(action: string): string;
@@ -123,6 +130,87 @@ export default class AppPlugin implements FlutterPlugin, MethodCallHandler {
   private static lastImportedGalleryIdentifier: string = '';
   private static lastFilePickerState: string = '';
   private static lastClipboardText: string = '';
+  private static pendingTabSync: NativeTabSyncPayload | null = null;
+  private static lastTabBarInset: number = 88;
+
+  public static notifyNativeTabSelected(index: number): void {
+    if (AppPlugin.activeChannel !== null) {
+      AppPlugin.activeChannel.invokeMethod('onNativeTabSelected', index);
+    }
+  }
+
+  public static notifyNativeTabBarInset(height: number): void {
+    AppPlugin.lastTabBarInset = height;
+    if (AppPlugin.activeChannel !== null) {
+      AppPlugin.activeChannel.invokeMethod('onNativeTabBarInset', height);
+    }
+  }
+
+  public static consumePendingTabSync(): NativeTabSyncPayload | null {
+    const pending = AppPlugin.pendingTabSync;
+    AppPlugin.pendingTabSync = null;
+    return pending;
+  }
+
+  private emitTabSync(payload: NativeTabSyncPayload): void {
+    AppPlugin.pendingTabSync = payload;
+    const abilityContext = this.ability?.context as common.UIAbilityContext | undefined;
+    if (abilityContext != null) {
+      abilityContext.eventHub.emit(EVENT_SYNC_NATIVE_TABS, payload);
+    }
+  }
+
+  private emitTabIndex(index: number): void {
+    const abilityContext = this.ability?.context as common.UIAbilityContext | undefined;
+    if (abilityContext != null) {
+      abilityContext.eventHub.emit(EVENT_SET_NATIVE_TAB_INDEX, index);
+    }
+  }
+
+  private emitTabBarVisible(visible: boolean, mode: string): void {
+    const abilityContext = this.ability?.context as common.UIAbilityContext | undefined;
+    if (abilityContext != null) {
+      abilityContext.eventHub.emit(EVENT_SET_NATIVE_TAB_BAR_VISIBLE, {
+        visible,
+        mode,
+      });
+    }
+  }
+
+  private parseTabSyncPayload(raw: Object | null): NativeTabSyncPayload {
+    const itemsRaw = this.readArg(raw, 'items');
+    const indexRaw = this.readArg(raw, 'index');
+    const items: NativeTabItem[] = [];
+    const list = itemsRaw as Object[] | undefined;
+    if (list !== undefined && list.length > 0) {
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
+        const id = `${this.readArg(item, 'id') ?? ''}`;
+        const label = `${this.readArg(item, 'label') ?? id}`;
+        if (id.length > 0) {
+          items.push({ id, label });
+        }
+      }
+    }
+    const index = Number(indexRaw ?? 0);
+    return {
+      items,
+      index: index >= 0 ? index : 0,
+    };
+  }
+
+  private readArg(raw: Object | null, key: string): Object | undefined {
+    if (raw == null) {
+      return undefined;
+    }
+    try {
+      const map = raw as Map<string, Object>;
+      return map.get(key);
+    } catch (_) {
+      const record = raw as Record<string, Object>;
+      return record[key];
+    }
+  }
   private pluginBinding: FlutterPluginBinding | null = null;
   private abilityBinding: AbilityPluginBinding | null = null;
   private channel: MethodChannel | null = null;
@@ -504,6 +592,31 @@ export default class AppPlugin implements FlutterPlugin, MethodCallHandler {
         result.success(true);
         return;
       }
+      case 'syncNativeTabs': {
+        const payload = this.parseTabSyncPayload(call.args);
+        this.emitTabSync(payload);
+        result.success(true);
+        return;
+      }
+      case 'setNativeTabIndex': {
+        const index = Number(call.args ?? 0);
+        this.emitTabIndex(Number.isFinite(index) ? index : 0);
+        result.success(true);
+        return;
+      }
+      case 'setNativeTabBarVisible': {
+        const visibleRaw = this.readArg(call.args as Object, 'visible');
+        const modeRaw = this.readArg(call.args as Object, 'mode');
+        const visible = visibleRaw === true || `${visibleRaw}` === 'true';
+        const mode = `${modeRaw ?? 'scroll'}`;
+        this.emitTabBarVisible(visible, mode);
+        result.success(true);
+        return;
+      }
+      case 'getNativeTabBarInset': {
+        result.success(AppPlugin.lastTabBarInset);
+        return;
+      }
       case 'exitApp': {
         const abilityContext = this.ability?.context;
         if (abilityContext == null) {
@@ -640,6 +753,12 @@ export default class AppPlugin implements FlutterPlugin, MethodCallHandler {
             nativeBridge.lastError(),
           );
         }
+        return;
+      }
+      case 'onFlutterTabChanged': {
+        const index = typeof call.args === 'number' ? call.args : 0;
+        this.ability?.context.eventHub.emit('FLUTTER_TAB_CHANGED', index);
+        result.success(true);
         return;
       }
       case 'invokeCore': {

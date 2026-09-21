@@ -193,7 +193,7 @@ class AppSidebarContainer extends ConsumerWidget {
     final navigationState = ref.watch(navigationStateProvider);
     final navigationItems = navigationState.navigationItems;
     final isMobileView = navigationState.viewMode == ViewMode.mobile;
-    if (isMobileView) {
+    if (isMobileView || system.isOhos) {
       return child;
     }
     final currentIndex = navigationState.currentIndex;

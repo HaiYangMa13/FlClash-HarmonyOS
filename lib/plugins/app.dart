@@ -12,6 +12,8 @@ class App {
   Function()? onExit;
   Future<void> Function(String link)? onAppLink;
   Future<void> Function(Map<String, dynamic>?)? onPendingDebugVpnStart;
+  void Function(int index)? onNativeTabSelected;
+  final ValueNotifier<double> nativeTabBarInset = ValueNotifier<double>(88);
 
   App._internal() {
     methodChannel = const MethodChannel('$packageName/app');
@@ -33,6 +35,15 @@ class App {
             return;
           }
           throw MissingPluginException();
+        case 'onNativeTabSelected':
+          final index = (call.arguments as num?)?.toInt() ?? 0;
+          if (onNativeTabSelected != null) {
+            onNativeTabSelected!(index);
+          }
+          return;
+        case 'onNativeTabBarInset':
+          nativeTabBarInset.value = (call.arguments as num?)?.toDouble() ?? 0;
+          return;
         case 'exit':
           if (onExit != null) {
             await onExit!();
@@ -70,6 +81,35 @@ class App {
 
   Future<bool?> updateAppLinkListenerReady(bool value) {
     return methodChannel.invokeMethod<bool>('updateAppLinkListenerReady', value);
+  }
+
+  Future<bool?> syncNativeTabs({
+    required List<Map<String, String>> items,
+    required int index,
+  }) {
+    return methodChannel.invokeMethod<bool>('syncNativeTabs', {
+      'items': items,
+      'index': index,
+    });
+  }
+
+  Future<bool?> setNativeTabIndex(int index) {
+    return methodChannel.invokeMethod<bool>('setNativeTabIndex', index);
+  }
+
+  Future<bool?> setNativeTabBarVisible({
+    required bool visible,
+    required String mode,
+  }) {
+    return methodChannel.invokeMethod<bool>('setNativeTabBarVisible', {
+      'visible': visible,
+      'mode': mode,
+    });
+  }
+
+  Future<double?> getNativeTabBarInset() async {
+    final value = await methodChannel.invokeMethod<num>('getNativeTabBarInset');
+    return value?.toDouble();
   }
 
   Future<int?> startCoreChildProcess(String entryParams) {
